@@ -1,0 +1,143 @@
+# GoReleaser configuration for testify/depend
+# Documentation: https://goreleaser.com
+
+version: 2
+
+before:
+  hooks:
+    # Use Makefile for comprehensive pre-release validation
+    # This ensures: deps, tidy, fmt, vet, and tests (excluding examples with intentional failures)
+    - make release-check
+
+builds:
+  - id: dependgen
+    # Use Makefile for builds - single source of truth
+    dir: .
+    binary: dependgen
+
+    # Define target platforms
+    goos:
+      - linux
+      - darwin
+      - windows
+
+    goarch:
+      - amd64
+      - arm64
+
+    # Skip unsupported combinations
+    ignore:
+      - goos: windows
+        goarch: arm64
+
+    # Use hooks to call make build for each platform
+    hooks:
+      pre:
+        - make build GOOS={{.Os}} GOARCH={{.Arch}} VERSION={{.Version}} COMMIT={{.Commit}} DATE={{.Date}}
+
+    # Tell GoReleaser the hook handles the build
+    skip: true
+
+archives:
+  - id: dependgen
+    # Modern format syntax (goreleaser v2)
+    formats:
+      - tar.gz
+      - zip
+
+    name_template: >-
+      {{ .ProjectName }}_dependgen_
+      {{- .Version }}_
+      {{- title .Os }}_
+      {{- if eq .Arch "amd64" }}x86_64
+      {{- else if eq .Arch "386" }}i386
+      {{- else }}{{ .Arch }}{{ end }}
+      {{- if .Arm }}v{{ .Arm }}{{ end }}
+
+    # Include only source code and documentation
+    # GoReleaser respects .gitignore by default
+    files:
+      - LICENSE
+      - README.md
+      - "depend/**/*.go"
+      - "!depend/**/*_test.go"  # Exclude all test files
+      - "depend/doc.go"
+      - "depend/examples/**"
+
+checksum:
+  name_template: 'checksums.txt'
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  sort: asc
+  use: github
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+      - '^chore:'
+      - typo
+  groups:
+    - title: Features
+      regexp: '^.*?feat(\([[:word:]]+\))??!?:.+$'
+      order: 0
+    - title: Bug Fixes
+      regexp: '^.*?fix(\([[:word:]]+\))??!?:.+$'
+      order: 1
+    - title: Dependency Updates
+      regexp: '^.*?(deps|build)(\([[:word:]]+\))??!?:.+$'
+      order: 2
+    - title: Other Changes
+      order: 999
+
+release:
+  github:
+    owner: srgg
+    name: testify
+
+  # Draft release for manual review before publishing
+  draft: true
+
+  # Mark pre-releases (e.g., v0.1.0-beta.1)
+  prerelease: auto
+
+  # Release name template
+  name_template: "{{.ProjectName}} v{{.Version}}"
+
+  # Footer for release notes
+  footer: |
+    ## Installation
+
+    ### Using go install
+    ```bash
+    go install github.com/srgg/testify/depend/cmd/dependgen@{{.Tag}}
+    ```
+
+    ### Using go get (Go 1.24+)
+    ```bash
+    go get -tool github.com/srgg/testify/depend/cmd/dependgen@{{.Tag}}
+    ```
+
+    ### Download Binary
+    Download the appropriate binary for your platform from the assets above.
+
+# Announce releases (optional - configure if you want)
+# announce:
+#   twitter:
+#     enabled: false
+#   discord:
+#     enabled: false
+
+# Homebrew tap (optional - for easy installation on macOS/Linux)
+# brews:
+#   - name: dependgen
+#     repository:
+#       owner: srgg
+#       name: homebrew-tap
+#     description: "Code generator for testify/depend test suites"
+#     homepage: "https://github.com/srgg/testify"
+#     license: "MIT"
+#     install: |
+#       bin.install "dependgen"

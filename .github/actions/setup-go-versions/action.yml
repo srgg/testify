@@ -1,0 +1,93 @@
+# Go Version Detection
+#
+# Purpose: Detects Go versions for CI workflows
+# - MIN version: Read dynamically from go.mod (always in sync with code requirements)
+# - MAX version: Auto-detected from go.dev API (or explicitly set via GO_MAX env)
+#
+# Why: Ensures all workflows (CI, release, etc.) use the identical Go versions for
+# matrix testing without duplication. Single source of truth for version management.
+#
+# Usage:
+#   - name: Detect Go versions
+#     id: go-versions
+#     uses: ./.github/actions/setup-go-versions
+#
+#   - name: Set up Go
+#     uses: actions/setup-go@v5
+#     with:
+#       go-version: ${{ steps.go-versions.outputs.go-max }}
+
+name: 'Detect Go Versions'
+description: 'Detects MIN from go.mod, MAX auto-detected from go.dev API or from GO_MAX env'
+
+outputs:
+  go-min:
+    description: 'Minimum supported Go version (from go.mod)'
+    value: ${{ steps.load.outputs.go-min }}
+  go-max:
+    description: 'Maximum Go version for testing'
+    value: ${{ steps.load.outputs.go-max }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Load Go versions
+      id: load
+      shell: bash
+      run: |
+        set -euo pipefail  # Exit on error, undefined vars, pipe failures
+
+        # Read minimum version from go.mod
+        if [ ! -f "go.mod" ]; then
+          echo "❌ go.mod not found - ensure checkout action runs first"
+          exit 1
+        fi
+
+        GO_MIN=$(awk '/^go / {print $2}' go.mod)
+
+        if [ -z "$GO_MIN" ]; then
+          echo "❌ No 'go X.Y' directive found in go.mod"
+          exit 1
+        fi
+
+        # Determine maximum Go version
+        if [ -n "${{ env.GO_MAX }}" ]; then
+          # Use explicitly configured version from workflow env
+          GO_MAX="${{ env.GO_MAX }}"
+          GO_MAX_SOURCE="pinned"
+        else
+          # Auto-detect latest stable from official Go downloads API
+          echo "→ Auto-detecting latest Go release from go.dev API..."
+
+          RESPONSE=$(curl -sL --max-time 10 https://go.dev/dl/?mode=json 2>&1)
+
+          if [ $? -ne 0 ]; then
+            echo "❌ Failed to fetch from go.dev API"
+            echo "→ Set GO_MAX env variable in workflow to avoid API dependency"
+            exit 1
+          fi
+
+          # Extract version from first stable release
+          # Response format: [{"version": "go1.25.3","stable": true,...}]
+          # Extract "1.25" from "go1.25.3"
+          GO_MAX=$(echo "$RESPONSE" | \
+                   grep -o '"version"[[:space:]]*:[[:space:]]*"go[0-9.]*"' | \
+                   head -n1 | \
+                   sed -E 's/.*"go([0-9]+\.[0-9]+).*/\1/')
+
+          if [ -z "$GO_MAX" ]; then
+            echo "❌ Could not detect Go version from go.dev"
+            echo "→ go.dev returned (first 200 chars):"
+            echo "$RESPONSE" | head -c 200
+            echo ""
+            echo "→ Workaround: Set GO_MAX env variable in workflow to pin a version"
+            exit 1
+          fi
+
+          GO_MAX_SOURCE="auto-detected"
+        fi
+
+        # Write outputs
+        echo "go-min=$GO_MIN" >> $GITHUB_OUTPUT
+        echo "go-max=$GO_MAX" >> $GITHUB_OUTPUT
+        echo "✓ Go versions: min=$GO_MIN (go.mod), max=$GO_MAX ($GO_MAX_SOURCE)"

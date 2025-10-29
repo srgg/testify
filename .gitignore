@@ -1,0 +1,25 @@
+# Generated dependency files
+*_depend_test.go
+
+# Build artifacts
+/build/
+/dist/
+gotestfmt
+
+# Test artifacts
+/coverage/
+
+# Temporary files
+/tmp/
+*.tmp
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db

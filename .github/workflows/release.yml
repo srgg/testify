@@ -1,0 +1,88 @@
+# Release Workflow
+#
+# Purpose: Automated release creation and publishing to GitHub Releases
+# Triggered by: Pushing version tags (e.g., v0.1.0, v1.2.3)
+#
+# What it does:
+# 1. Validates code quality (deps, fmt, vet, tests)
+# 2. Builds cross-platform binaries (Linux, macOS, Windows on amd64/arm64)
+# 3. Creates GitHub release with binaries and checksums
+# 4. Auto-generates changelog from conventional commits
+#
+# Usage:
+#   git tag -a v0.1.0 -m "Release v0.1.0: Initial release"
+#   git push origin v0.1.0
+#
+# Notes:
+# - Uses GoReleaser for build orchestration
+# - Requires a clean git working directory
+# - Version from tag (must start with 'v')
+# - See .goreleaser.yaml for build configuration
+
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'  # Trigger on version tags: v0.1.0, v1.2.3, etc.
+
+permissions:
+  contents: write  # Required to create GitHub releases
+
+concurrency:
+  group: release
+  cancel-in-progress: false  # Never cancel running releases
+
+jobs:
+  release:
+    name: Validate, Build, and Publish Release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full git history for changelog generation
+
+      - name: Detect Go versions
+        id: go-versions
+        uses: ./.github/actions/setup-go-versions
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ steps.go-versions.outputs.go-max }}
+          cache: true  # Cache Go modules and build cache
+
+      # Install GoReleaser (cached by action)
+      - name: Set up GoReleaser
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          install-only: true  # Install, don't run yet
+          version: '~> v2'    # Pin to v2.x for stability
+
+      - name: Install gotestfmt
+        run: go install github.com/gotesttools/gotestfmt/v2/cmd/gotestfmt@latest
+
+      # Validate everything before releasing
+      # Runs: deps, fmt, vet, tests, goreleaser config check, git status check
+      - name: Run release checks (deps, fmt, vet, tests)
+        run: make release-check
+
+      - name: Upload test log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-test-log
+          path: /tmp/gotest.log
+          retention-days: 14
+          if-no-files-found: warn
+
+      # Build and publish release
+      # Creates GitHub release with binaries, checksums, and auto-generated changelog
+      - name: Run GoReleaser
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          version: '~> v2'
+          args: release --clean  # Clean dist/ before building
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

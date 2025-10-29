@@ -1,0 +1,134 @@
+# Continuous Integration Workflow
+#
+# Purpose: Validates code quality, formatting, and correctness on every commit
+# Triggered by: Pull requests
+#
+# What it does:
+# 1. Matrix testing across the minimum and maximum supported Go versions
+# 2. Code quality checks: formatting (gofmt), static analysis (go vet)
+# 3. Dependency management validation
+# 4. Full test suite execution with race detection
+# 5. Binary build verification
+# 6. Code coverage reporting (on the latest Go version only)
+#
+# Matrix Strategy:
+# - Tests against Go MIN (from go.mod) and Go MAX (auto-detected or pinned)
+# - Ensures compatibility across the supported Go version range
+# - Coverage reports generated only on the latest Go to avoid duplication
+#
+# Notes:
+# - examples/ directory excluded (contains intentional test failures)
+# - Coverage threshold: 60% (configurable in Makefile)
+# - Race detector enabled for concurrency bug detection
+
+name: CI
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write  # Required for wiki write access (coverage badge)
+
+jobs:
+  # Detects MIN/MAX Go versions for matrix testing
+  # Runs once to provide versions for parallel test jobs
+  go-versions:
+    name: Detect and Set Min/Max Go Versions
+    runs-on: ubuntu-latest
+    outputs:
+      go-min: ${{ steps.versions.outputs.go-min }}
+      go-max: ${{ steps.versions.outputs.go-max }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Detect Go versions
+        id: versions
+        uses: ./.github/actions/setup-go-versions
+
+  # Matrix testing across Go versions
+  # Runs in parallel for each version (min and max)
+  test:
+    name: Test (Go ${{ matrix.go-version }})
+    needs: go-versions
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        go-version: ['${{ needs.go-versions.outputs.go-min }}', '${{ needs.go-versions.outputs.go-max }}']
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go-version }}
+          cache: true  # Cache Go modules and build cache
+
+      - name: Download dependencies
+        run: make deps
+
+      - name: Install gotestfmt
+        run: go install github.com/gotesttools/gotestfmt/v2/cmd/gotestfmt@latest
+
+      - name: Check formatting
+        run: make fmt
+
+      - name: Run go vet
+        run: make vet
+
+      - name: Run tests
+        run: make test  # Excludes examples/ (intentional failures)
+
+      - name: Upload test log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-log-go-${{ matrix.go-version }}
+          path: /tmp/gotest.log
+          retention-days: 7
+          if-no-files-found: warn
+
+      - name: Build binary
+        run: make build
+
+      # Coverage: Only run on the latest Go version to avoid duplication
+      - name: Check code coverage
+        if: matrix.go-version == needs.go-versions.outputs.go-max
+        run: make coverage
+        continue-on-error: true  # Don't fail CI if coverage below threshold
+
+      - name: Post coverage comment to PR
+        if: matrix.go-version == needs.go-versions.outputs.go-max && github.event_name == 'pull_request'
+        uses: ncruces/go-coverage-report@v0
+        with:
+          coverage-file: coverage/coverage.out
+          report: true
+          chart: true
+          amend: true
+        continue-on-error: true
+
+      - name: Update coverage badge
+        if: matrix.go-version == needs.go-versions.outputs.go-max && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: ncruces/go-coverage-report@v0
+        with:
+          coverage-file: coverage/coverage.out
+          report: false
+          chart: false
+          amend: false
+
+      - name: Upload coverage reports
+        if: matrix.go-version == needs.go-versions.outputs.go-max
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-reports
+          path: |
+            coverage/coverage.html
+            coverage/coverage-func.txt
+            coverage/coverage.out
+          retention-days: 14
