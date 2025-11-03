@@ -5,7 +5,15 @@ All notable changes to this project will be documented in this file.
 This project follows the [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) format
 and adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.1.0] — Unreleased
+## [0.1.1] — Unreleased
+
+### Fixed
+- **dependgen**: Build tags (`//go:build` and `// +build` directives) are now correctly preserved from source test files to generated `*_depend_test.go` files ([#1](https://github.com/srgg/testify/issues/1))
+  - Scans all comment groups before package declaration to find build constraints
+  - Handles files with copyright notices or other comments before build tags
+  - Ensures generated files maintain the same build constraints as source files
+
+## [0.1.0] — 2024-11-03
 
 Initial public release of `testify/depend`, bringing first-class dependency management
 to Go test suites built with `stretchr/testify`.
