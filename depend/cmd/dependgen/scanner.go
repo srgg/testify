@@ -22,18 +22,21 @@ type SuiteInfo struct {
 	Package    string           // Package name (e.g., "depend")
 	Tests      []TestMethodInfo // Test methods in this suite
 	SourceFile string           // Source file where suite was defined (e.g., "runtime_test.go")
+	BuildTags  []string         // Build tags from source file (e.g., ["//go:build test", "// +build test"])
 }
 
 // suiteCollector collects suite information during scanning.
 // It encapsulates the logic for tracking suites and their test methods.
 type suiteCollector struct {
-	suites map[string]SuiteInfo
+	suites           map[string]SuiteInfo
+	srcFileBuildTags map[string][]string // sourceFile -> buildTags
 }
 
 // newSuiteCollector creates a new suite collector.
 func newSuiteCollector() *suiteCollector {
 	return &suiteCollector{
-		suites: make(map[string]SuiteInfo),
+		suites:           make(map[string]SuiteInfo),
+		srcFileBuildTags: make(map[string][]string),
 	}
 }
 
@@ -44,6 +47,11 @@ func (c *suiteCollector) addSuiteName(name string) {
 			Name: name,
 		}
 	}
+}
+
+// setBuildTags stores build tags for a source file.
+func (c *suiteCollector) setBuildTags(sourceFile string, buildTags []string) {
+	c.srcFileBuildTags[sourceFile] = buildTags
 }
 
 // addTest adds a test method to a suite.
@@ -58,6 +66,10 @@ func (c *suiteCollector) addTest(suiteName, packageName, sourceFile string, test
 	}
 	if info.SourceFile == "" {
 		info.SourceFile = sourceFile
+	}
+	// Set build tags from the map if not already set
+	if info.BuildTags == nil {
+		info.BuildTags = c.srcFileBuildTags[sourceFile]
 	}
 	info.Tests = append(info.Tests, test)
 	c.suites[suiteName] = info
@@ -141,8 +153,12 @@ func (s *SuiteScanner) processFile(f *ast.File, sourceFile string) (bool, error)
 		return false, nil
 	}
 
-	// Extract package name from the AST file
+	// Extract package name and build tags from the AST file
 	packageName := f.Name.Name
+	buildTags := extractBuildTags(f)
+
+	// Store build tags for this source file
+	s.collector.setBuildTags(sourceFile, buildTags)
 
 	// Single-pass AST traversal: process both type declarations and method declarations in one iteration
 	for _, decl := range f.Decls {
@@ -312,4 +328,35 @@ func parseDependsOnComment(commentText string) []string {
 		}
 	}
 	return deps
+}
+
+// extractBuildTags extracts build constraint comments from an AST file.
+// It looks for //go:build and // +build directives at the top of the file.
+// These comments appear before the package declaration and must be preserved
+// in generated files to maintain build constraints.
+//
+// Returns a slice of complete comment lines including the "//" prefix.
+// Example output: ["//go:build test", "// +build test"]
+func extractBuildTags(f *ast.File) []string {
+	var buildTags []string
+
+	// Build tags can appear in any comment group before the package declaration.
+	// Scan all comment groups that appear before the package keyword.
+	for _, commentGroup := range f.Comments {
+		// Stop if we've reached comments after the package declaration
+		if commentGroup.Pos() >= f.Package {
+			break
+		}
+
+		// Check each comment in the group for build tags
+		for _, comment := range commentGroup.List {
+			text := comment.Text
+			// Look for build constraint comments
+			if strings.HasPrefix(text, "//go:build") || strings.HasPrefix(text, "// +build") {
+				buildTags = append(buildTags, text)
+			}
+		}
+	}
+
+	return buildTags
 }
