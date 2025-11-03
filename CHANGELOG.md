@@ -7,6 +7,9 @@ and adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [0.1.1] — Unreleased
 
+### Added
+- **dependgen**: Human-readable dependency documentation in generated files ([#3](https://github.com/srgg/testify/issues/3))
+  
 ### Fixed
 - **dependgen**: Build tags (`//go:build` and `// +build` directives) are now correctly preserved from source test files to generated `*_depend_test.go` files ([#1](https://github.com/srgg/testify/issues/1))
   - Scans all comment groups before package declaration to find build constraints
